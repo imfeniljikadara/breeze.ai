@@ -13,6 +13,10 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Ensure cache directory exists
+CACHE_DIR = os.environ.get('TRANSFORMERS_CACHE', '/cache')
+os.makedirs(CACHE_DIR, exist_ok=True)
+
 app = FastAPI(
     title="Terra AI GPT Weather API",
     description="GPT-2 powered weather analysis API",
@@ -40,11 +44,19 @@ def load_model():
         logger.info(f"Loading model {MODEL_PATH}...")
         
         # Load tokenizer first
-        tokenizer = GPT2Tokenizer.from_pretrained(MODEL_PATH)
+        tokenizer = GPT2Tokenizer.from_pretrained(
+            MODEL_PATH,
+            cache_dir=CACHE_DIR,
+            local_files_only=False
+        )
         tokenizer.pad_token = tokenizer.eos_token
         
         # Load model with basic settings
-        model = GPT2LMHeadModel.from_pretrained(MODEL_PATH)
+        model = GPT2LMHeadModel.from_pretrained(
+            MODEL_PATH,
+            cache_dir=CACHE_DIR,
+            local_files_only=False
+        )
         model.eval()  # Set to evaluation mode
         
         logger.info("Model loaded successfully!")
