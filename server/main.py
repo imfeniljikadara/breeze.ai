@@ -46,18 +46,19 @@ def load_model():
         # Load tokenizer first
         tokenizer = GPT2Tokenizer.from_pretrained(
             MODEL_PATH,
-            cache_dir=cache_dir
+            cache_dir=cache_dir,
+            local_files_only=False
         )
         tokenizer.pad_token = tokenizer.eos_token
         
-        # Load model with optimizations
+        # Load model with optimizations for CPU
         model = GPT2LMHeadModel.from_pretrained(
             MODEL_PATH,
-            torch_dtype=torch.float16,
+            torch_dtype=torch.float32,  # Use float32 for CPU
             low_cpu_mem_usage=True,
-            device_map="auto",
-            cache_dir=cache_dir
-        )
+            cache_dir=cache_dir,
+            local_files_only=False
+        ).cpu()  # Explicitly move to CPU
         
         logger.info("Model loaded successfully!")
         return True
@@ -84,19 +85,20 @@ def generate_response(prompt: str, max_length: int = 150, temperature: float = 0
         system_prompt = "You are a weather assistant. Provide brief, accurate responses about weather conditions and recommendations."
         full_prompt = f"{system_prompt}\n\nQuestion: {prompt}\nAnswer:"
         
-        inputs = tokenizer(full_prompt, return_tensors="pt", padding=True).to(model.device)
+        inputs = tokenizer(full_prompt, return_tensors="pt", padding=True)
         
         # Generate with optimized parameters
-        outputs = model.generate(
-            **inputs,
-            max_length=max_length,
-            temperature=temperature,
-            top_p=0.9,
-            do_sample=True,
-            pad_token_id=tokenizer.eos_token_id,
-            num_return_sequences=1,
-            early_stopping=True
-        )
+        with torch.no_grad():  # Disable gradient calculation for inference
+            outputs = model.generate(
+                **inputs,
+                max_length=max_length,
+                temperature=temperature,
+                top_p=0.9,
+                do_sample=True,
+                pad_token_id=tokenizer.eos_token_id,
+                num_return_sequences=1,
+                early_stopping=True
+            )
         
         response = tokenizer.decode(outputs[0], skip_special_tokens=True)
         response = response.replace(full_prompt, "").strip()
