@@ -109,7 +109,43 @@ def get_default_response(prompt: str) -> str:
     else:
         return "I can only assist with weather-related questions. Please ask me about weather conditions, forecasts, or outdoor activity recommendations!"
 
+def extract_location(prompt: str) -> Optional[str]:
+    """Extract location from weather-related query."""
+    location_markers = ["in ", "at ", "for ", "about "]
+    prompt_lower = prompt.lower()
+    
+    for marker in location_markers:
+        if marker in prompt_lower:
+            location = prompt_lower.split(marker)[-1].strip()
+            return location.strip("?.,! ")
+    return None
+
+def validate_response(response: str, location: Optional[str]) -> str:
+    """Validate and fix weather response format."""
+    if not response or len(response) < 10:
+        return f"I don't have current weather data for {location if location else 'that location'}."
+        
+    # Force the response into our template
+    lines = response.lower().split('\n')
+    has_conditions = any('current conditions:' in line for line in lines)
+    has_temperature = any('temperature:' in line for line in lines)
+    has_recommendation = any('recommendation:' in line for line in lines)
+    
+    if not (has_conditions and has_temperature and has_recommendation):
+        return f"I don't have current weather data for {location if location else 'that location'}."
+        
+    # Only keep lines matching our template
+    valid_lines = []
+    for line in lines:
+        if any(key in line for key in ['current conditions:', 'temperature:', 'recommendation:']):
+            valid_lines.append(line.capitalize())
+    
+    return '\n'.join(valid_lines) if valid_lines else f"I don't have current weather data for {location if location else 'that location'}."
+
 def generate_response(prompt: str, max_length: int = 50, temperature: float = 0.7):
+    # Extract location first
+    location = extract_location(prompt)
+    
     # Check if it's a greeting or non-weather question
     if not any(keyword in prompt.lower() for keyword in WEATHER_KEYWORDS):
         return get_default_response(prompt)
@@ -126,19 +162,19 @@ def generate_response(prompt: str, max_length: int = 50, temperature: float = 0.
     
     try:
         # Prepare the prompt with strict weather context and template
-        system_prompt = """You are Terra AI, a focused weather assistant. Follow these rules exactly:
+        system_prompt = f"""You are Terra AI, a weather assistant. ONLY respond in this EXACT format:
 
-1. ONLY discuss current weather conditions
-2. Use this EXACT format for location-based questions:
-   "Current conditions: [brief description]
-   Temperature: [range]
-   Recommendation: [1 brief tip]"
-3. Keep ALL responses under 50 words
-4. NO historical data or long-term trends
-5. If unsure, say "I don't have current weather data for [location]"
-6. NEVER discuss non-weather topics"""
+Current conditions: [1-2 words]
+Temperature: [number] degrees
+Recommendation: [5-10 words]
+
+Location: {location if location else 'unknown'}
+Rules:
+1. ONLY use the format above
+2. NEVER add extra text
+3. If unsure, respond: "I don't have current weather data for {location if location else 'that location'}" """
         
-        full_prompt = f"{system_prompt}\n\nQuestion: {prompt}\nWeather-focused answer:"
+        full_prompt = f"{system_prompt}\n\nQuestion: {prompt}\nResponse:"
         
         # Tokenize input
         inputs = tokenizer.encode(full_prompt, return_tensors="pt")
@@ -149,29 +185,24 @@ def generate_response(prompt: str, max_length: int = 50, temperature: float = 0.
                 inputs,
                 max_length=max_length,
                 do_sample=True,
-                temperature=0.5,  # Reduced temperature for more focused responses
-                top_p=0.8,
-                top_k=20,  # More restricted sampling
+                temperature=0.3,  # Even lower temperature
+                top_p=0.7,
+                top_k=10,  # Very restricted sampling
                 num_return_sequences=1,
                 pad_token_id=tokenizer.eos_token_id,
-                repetition_penalty=1.3,  # Increased repetition penalty
-                length_penalty=1.2,  # Encourage even more concise responses
+                repetition_penalty=1.4,
+                length_penalty=1.5,
                 early_stopping=True,
                 min_length=10,
-                no_repeat_ngram_size=3  # Stricter repetition prevention
+                no_repeat_ngram_size=3
             )
         
         # Decode and clean response
         response = tokenizer.decode(outputs[0], skip_special_tokens=True)
         response = response.replace(full_prompt, "").strip()
         
-        # Validate response is weather-related
-        if not is_weather_related(response):
-            return "I don't have current weather data for that location. Please ask about specific weather conditions or forecasts."
-        
-        # Clean up common model artifacts
-        response = response.replace("AI:", "").replace("Assistant:", "").strip()
-        response = response.split("\n\n")[0]  # Take only the first paragraph
+        # Validate and fix response format
+        response = validate_response(response, location)
         
         # Cache valid response
         cache_response(prompt, response)
