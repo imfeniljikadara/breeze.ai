@@ -150,6 +150,13 @@ def generate_response(prompt: str, max_length: int = 50, temperature: float = 0.
     if not any(keyword in prompt.lower() for keyword in WEATHER_KEYWORDS):
         return get_default_response(prompt)
 
+    # Handle general weather advice questions
+    if "wear" in prompt.lower() or "bring" in prompt.lower() or "pack" in prompt.lower():
+        if not location:
+            return """Current conditions: Variable
+Temperature: 20-30 degrees
+Recommendation: Check local forecast before choosing outfit"""
+
     # Check cache first
     cached_response = get_cached_response(prompt)
     if cached_response:
@@ -168,33 +175,54 @@ Current conditions: [1-2 words]
 Temperature: [number] degrees
 Recommendation: [5-10 words]
 
-Location: {location if location else 'unknown'}
+Here are some EXAMPLE responses:
+
+Question: What's the weather in London?
+Response:
+Current conditions: Rainy
+Temperature: 15 degrees
+Recommendation: Bring umbrella and wear waterproof jacket
+
+Question: How's the beach weather?
+Response:
+Current conditions: Sunny
+Temperature: 28 degrees
+Recommendation: Bring sunscreen and stay hydrated today
+
+Question: Should I go hiking?
+Response:
+Current conditions: Cloudy
+Temperature: 22 degrees
+Recommendation: Good conditions for hiking, bring water
+
+Location: {location if location else 'general area'}
 Rules:
 1. ONLY use the format above
 2. NEVER add extra text
-3. If unsure, respond: "I don't have current weather data for {location if location else 'that location'}" """
+3. Always give a helpful response
+4. Use common sense temperatures (10-35 degrees)"""
         
         full_prompt = f"{system_prompt}\n\nQuestion: {prompt}\nResponse:"
         
         # Tokenize input
         inputs = tokenizer.encode(full_prompt, return_tensors="pt")
         
-        # Generate with very strict parameters
+        # Generate with balanced parameters
         with torch.no_grad():
             outputs = model.generate(
                 inputs,
                 max_length=max_length,
                 do_sample=True,
-                temperature=0.3,  # Even lower temperature
-                top_p=0.7,
-                top_k=10,  # Very restricted sampling
+                temperature=0.4,  # Slightly higher for more variety
+                top_p=0.75,
+                top_k=15,  # Allow more options
                 num_return_sequences=1,
                 pad_token_id=tokenizer.eos_token_id,
-                repetition_penalty=1.4,
-                length_penalty=1.5,
+                repetition_penalty=1.3,
+                length_penalty=1.3,
                 early_stopping=True,
                 min_length=10,
-                no_repeat_ngram_size=3
+                no_repeat_ngram_size=2
             )
         
         # Decode and clean response
