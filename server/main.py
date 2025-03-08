@@ -21,7 +21,20 @@ logger = logging.getLogger(__name__)
 # Weather API configuration
 WEATHER_API_KEY = os.environ.get("WEATHER_API_KEY")
 if not WEATHER_API_KEY:
-    logger.error("No OpenWeatherMap API key found. Please set WEATHER_API_KEY environment variable.")
+    logger.error("""
+OpenWeatherMap API key not configured! Please follow these steps:
+
+1. Sign up for a free account at: https://home.openweathermap.org/users/sign_up
+2. Get your API key from: https://home.openweathermap.org/api_keys
+3. Set up the API key:
+   
+   For local development:
+   - Add WEATHER_API_KEY=your_api_key to .env file
+   
+   For Hugging Face Spaces:
+   - Go to Space Settings
+   - Add Repository Secret: WEATHER_API_KEY=your_api_key
+""")
 WEATHER_API_URL = "https://api.openweathermap.org/data/2.5/weather"
 
 # Weather-related keywords for query validation
@@ -115,8 +128,10 @@ def extract_location(prompt: str) -> Optional[str]:
 def get_weather_data(location: str) -> Optional[Dict]:
     """Fetch weather data from OpenWeatherMap API."""
     if not WEATHER_API_KEY:
-        logger.error("OpenWeatherMap API key not configured")
-        return None
+        return {
+            "error": "API key not configured",
+            "message": "Please configure the OpenWeatherMap API key. See logs for instructions."
+        }
 
     try:
         params = {
@@ -131,20 +146,35 @@ def get_weather_data(location: str) -> Optional[Dict]:
             return response.json()
         elif response.status_code == 401:
             logger.error("Invalid API key. Please check your OpenWeatherMap API key.")
-            return None
+            return {
+                "error": "invalid_key",
+                "message": "Invalid API key. Please check your OpenWeatherMap API key configuration."
+            }
         elif response.status_code == 404:
             logger.error(f"Location '{location}' not found")
-            return None
+            return {
+                "error": "location_not_found",
+                "message": f"Could not find weather data for location: {location}"
+            }
         else:
             logger.error(f"Weather API error: {response.status_code} - {response.text}")
-            return None
+            return {
+                "error": "api_error",
+                "message": f"Error fetching weather data: {response.text}"
+            }
             
     except requests.exceptions.RequestException as e:
         logger.error(f"Error connecting to weather service: {str(e)}")
-        return None
+        return {
+            "error": "connection_error",
+            "message": "Could not connect to weather service. Please try again later."
+        }
     except Exception as e:
         logger.error(f"Unexpected error fetching weather data: {str(e)}")
-        return None
+        return {
+            "error": "unknown_error",
+            "message": "An unexpected error occurred while fetching weather data."
+        }
 
 def get_clothing_recommendation(weather_data: Dict) -> str:
     """Generate clothing recommendation based on weather conditions."""
@@ -192,6 +222,14 @@ def format_weather_response(weather_data: Dict, location: str) -> Dict:
             "data": None
         }
     
+    # Check for error responses
+    if "error" in weather_data:
+        return {
+            "text": weather_data["message"],
+            "domain": "error",
+            "data": weather_data
+        }
+    
     try:
         temp = weather_data.get("main", {}).get("temp", 0)
         temp_f = (temp * 9/5) + 32  # Convert to Fahrenheit
@@ -215,7 +253,7 @@ Recommendation: {recommendation}"""
         logger.error(f"Error formatting response: {str(e)}")
         return {
             "text": f"I have weather data for {location}, but encountered an error formatting it.",
-            "domain": "weather",
+            "domain": "error",
             "data": weather_data
         }
 
