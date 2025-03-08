@@ -18,6 +18,14 @@ logger = logging.getLogger(__name__)
 CACHE_DIR = os.environ.get('TRANSFORMERS_CACHE', '/cache')
 os.makedirs(CACHE_DIR, exist_ok=True)
 
+# Weather-related keywords for response validation
+WEATHER_KEYWORDS = {
+    'weather', 'temperature', 'rain', 'snow', 'wind', 'sunny', 'cloudy', 'storm',
+    'forecast', 'humidity', 'precipitation', 'climate', 'cold', 'hot', 'warm', 'cool',
+    'degrees', 'celsius', 'fahrenheit', 'outdoor', 'indoor', 'umbrella', 'sunscreen',
+    'jacket', 'coat', 'conditions'
+}
+
 app = FastAPI(
     title="Terra AI GPT Weather API",
     description="GPT-2 powered weather analysis API",
@@ -71,7 +79,7 @@ load_model()
 
 class ModelRequest(BaseModel):
     prompt: str
-    max_length: Optional[int] = 100  # Shorter responses for faster generation
+    max_length: Optional[int] = 50  # Even shorter responses
     temperature: Optional[float] = 0.7
     stream: Optional[bool] = False
 
@@ -87,7 +95,25 @@ def cache_response(prompt: str, response: str):
     if len(response_cache) > 100:  # Limit cache size
         response_cache.pop(next(iter(response_cache)))
 
-def generate_response(prompt: str, max_length: int = 100, temperature: float = 0.7):
+def is_weather_related(text: str) -> bool:
+    """Check if the response is weather-related."""
+    text_lower = text.lower()
+    return any(keyword in text_lower for keyword in WEATHER_KEYWORDS)
+
+def get_default_response(prompt: str) -> str:
+    """Get a default response for non-weather questions."""
+    if "hello" in prompt.lower() or "hi" in prompt.lower():
+        return "Hello! I'm Terra AI, a weather assistant. How can I help you with weather-related questions today?"
+    elif "how are you" in prompt.lower():
+        return "I'm here to help you with weather-related questions. What would you like to know about the weather?"
+    else:
+        return "I can only assist with weather-related questions. Please ask me about weather conditions, forecasts, or outdoor activity recommendations!"
+
+def generate_response(prompt: str, max_length: int = 50, temperature: float = 0.7):
+    # Check if it's a greeting or non-weather question
+    if not any(keyword in prompt.lower() for keyword in WEATHER_KEYWORDS):
+        return get_default_response(prompt)
+
     # Check cache first
     cached_response = get_cached_response(prompt)
     if cached_response:
@@ -99,34 +125,46 @@ def generate_response(prompt: str, max_length: int = 100, temperature: float = 0
             raise HTTPException(status_code=503, detail="Model not available")
     
     try:
-        # Prepare the prompt with weather-specific context
-        system_prompt = "You are a weather assistant. Provide brief, accurate responses about weather conditions and recommendations."
-        full_prompt = f"{system_prompt}\n\nQuestion: {prompt}\nAnswer:"
+        # Prepare the prompt with strict weather context
+        system_prompt = """You are Terra AI, a focused weather assistant. Provide only brief, weather-related responses.
+Rules:
+1. Only discuss weather, climate, and outdoor conditions
+2. Keep responses under 3 sentences
+3. Be specific and practical
+4. If the question is not about weather, redirect to weather topics"""
+        
+        full_prompt = f"{system_prompt}\n\nQuestion: {prompt}\nWeather-focused answer:"
         
         # Tokenize input
         inputs = tokenizer.encode(full_prompt, return_tensors="pt")
         
-        # Generate with optimized parameters
+        # Generate with strict parameters
         with torch.no_grad():
             outputs = model.generate(
                 inputs,
                 max_length=max_length,
-                do_sample=True,  # Enable sampling
+                do_sample=True,
                 temperature=temperature,
-                top_p=0.9,  # Nucleus sampling
-                top_k=50,  # Top-k sampling
+                top_p=0.9,
+                top_k=30,
                 num_return_sequences=1,
                 pad_token_id=tokenizer.eos_token_id,
-                repetition_penalty=1.2,  # Reduce repetition
-                length_penalty=1.0,  # Encourage concise responses
-                early_stopping=True
+                repetition_penalty=1.2,
+                length_penalty=1.0,
+                early_stopping=True,
+                min_length=10,  # Ensure some minimal response
+                no_repeat_ngram_size=2  # Prevent repetition of phrases
             )
         
         # Decode and clean response
         response = tokenizer.decode(outputs[0], skip_special_tokens=True)
         response = response.replace(full_prompt, "").strip()
         
-        # Cache the response
+        # Validate response is weather-related
+        if not is_weather_related(response):
+            return "I apologize, but I can only provide information about weather and climate. Please ask me about weather conditions, forecasts, or outdoor recommendations!"
+        
+        # Cache valid response
         cache_response(prompt, response)
         
         return response
@@ -134,7 +172,7 @@ def generate_response(prompt: str, max_length: int = 100, temperature: float = 0
         logger.error(f"Error generating response: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-async def generate_stream(prompt: str, max_length: int = 100, temperature: float = 0.7):
+async def generate_stream(prompt: str, max_length: int = 50, temperature: float = 0.7):
     try:
         response = generate_response(prompt, max_length, temperature)
         yield json.dumps({"text": response, "domain": "weather"})
