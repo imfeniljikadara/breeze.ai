@@ -125,35 +125,40 @@ def generate_response(prompt: str, max_length: int = 50, temperature: float = 0.
             raise HTTPException(status_code=503, detail="Model not available")
     
     try:
-        # Prepare the prompt with strict weather context
-        system_prompt = """You are Terra AI, a focused weather assistant. Provide only brief, weather-related responses.
-Rules:
-1. Only discuss weather, climate, and outdoor conditions
-2. Keep responses under 3 sentences
-3. Be specific and practical
-4. If the question is not about weather, redirect to weather topics"""
+        # Prepare the prompt with strict weather context and template
+        system_prompt = """You are Terra AI, a focused weather assistant. Follow these rules exactly:
+
+1. ONLY discuss current weather conditions
+2. Use this EXACT format for location-based questions:
+   "Current conditions: [brief description]
+   Temperature: [range]
+   Recommendation: [1 brief tip]"
+3. Keep ALL responses under 50 words
+4. NO historical data or long-term trends
+5. If unsure, say "I don't have current weather data for [location]"
+6. NEVER discuss non-weather topics"""
         
         full_prompt = f"{system_prompt}\n\nQuestion: {prompt}\nWeather-focused answer:"
         
         # Tokenize input
         inputs = tokenizer.encode(full_prompt, return_tensors="pt")
         
-        # Generate with strict parameters
+        # Generate with very strict parameters
         with torch.no_grad():
             outputs = model.generate(
                 inputs,
                 max_length=max_length,
                 do_sample=True,
-                temperature=temperature,
-                top_p=0.9,
-                top_k=30,
+                temperature=0.5,  # Reduced temperature for more focused responses
+                top_p=0.8,
+                top_k=20,  # More restricted sampling
                 num_return_sequences=1,
                 pad_token_id=tokenizer.eos_token_id,
-                repetition_penalty=1.2,
-                length_penalty=1.0,
+                repetition_penalty=1.3,  # Increased repetition penalty
+                length_penalty=1.2,  # Encourage even more concise responses
                 early_stopping=True,
-                min_length=10,  # Ensure some minimal response
-                no_repeat_ngram_size=2  # Prevent repetition of phrases
+                min_length=10,
+                no_repeat_ngram_size=3  # Stricter repetition prevention
             )
         
         # Decode and clean response
@@ -162,7 +167,11 @@ Rules:
         
         # Validate response is weather-related
         if not is_weather_related(response):
-            return "I apologize, but I can only provide information about weather and climate. Please ask me about weather conditions, forecasts, or outdoor recommendations!"
+            return "I don't have current weather data for that location. Please ask about specific weather conditions or forecasts."
+        
+        # Clean up common model artifacts
+        response = response.replace("AI:", "").replace("Assistant:", "").strip()
+        response = response.split("\n\n")[0]  # Take only the first paragraph
         
         # Cache valid response
         cache_response(prompt, response)
