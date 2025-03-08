@@ -2,52 +2,33 @@ import os
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from transformers import GPT2LMHeadModel, GPT2Tokenizer
+import torch
 from typing import Optional, Dict
 import json
 from fastapi.responses import StreamingResponse
 import logging
 from functools import lru_cache
-import requests
-from datetime import datetime
-from dotenv import load_dotenv
-
-# Load environment variables
-load_dotenv()
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Weather API configuration
-WEATHER_API_KEY = os.environ.get("WEATHER_API_KEY")
-if not WEATHER_API_KEY:
-    logger.error("""
-OpenWeatherMap API key not configured! Please follow these steps:
+# Ensure cache directory exists
+CACHE_DIR = os.environ.get('TRANSFORMERS_CACHE', '/cache')
+os.makedirs(CACHE_DIR, exist_ok=True)
 
-1. Sign up for a free account at: https://home.openweathermap.org/users/sign_up
-2. Get your API key from: https://home.openweathermap.org/api_keys
-3. Set up the API key:
-   
-   For local development:
-   - Add WEATHER_API_KEY=your_api_key to .env file
-   
-   For Hugging Face Spaces:
-   - Go to Space Settings
-   - Add Repository Secret: WEATHER_API_KEY=your_api_key
-""")
-WEATHER_API_URL = "https://api.openweathermap.org/data/2.5/weather"
-
-# Weather-related keywords for query validation
+# Weather-related keywords for response validation
 WEATHER_KEYWORDS = {
     'weather', 'temperature', 'rain', 'snow', 'wind', 'sunny', 'cloudy', 'storm',
     'forecast', 'humidity', 'precipitation', 'climate', 'cold', 'hot', 'warm', 'cool',
     'degrees', 'celsius', 'fahrenheit', 'outdoor', 'indoor', 'umbrella', 'sunscreen',
-    'jacket', 'coat', 'conditions', 'wear', 'bring', 'pack'
+    'jacket', 'coat', 'conditions'
 }
 
 app = FastAPI(
-    title="Terra AI Weather API",
-    description="Weather analysis API with real weather data",
+    title="Terra AI GPT Weather API",
+    description="GPT-2 powered weather analysis API",
     version="1.0.0"
 )
 
@@ -60,49 +41,73 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Global variables for model and tokenizer
+model = None
+tokenizer = None
+
+def load_model():
+    global model, tokenizer
+    try:
+        # Load model - using GPT-2 small for faster responses
+        MODEL_PATH = "gpt2"
+        logger.info(f"Loading model {MODEL_PATH}...")
+        
+        # Load tokenizer first
+        tokenizer = GPT2Tokenizer.from_pretrained(
+            MODEL_PATH,
+            cache_dir=CACHE_DIR,
+            local_files_only=False
+        )
+        tokenizer.pad_token = tokenizer.eos_token
+        
+        # Load model with basic settings
+        model = GPT2LMHeadModel.from_pretrained(
+            MODEL_PATH,
+            cache_dir=CACHE_DIR,
+            local_files_only=False
+        )
+        model.eval()  # Set to evaluation mode
+        
+        logger.info("Model loaded successfully!")
+        return True
+    except Exception as e:
+        logger.error(f"Error loading model: {str(e)}")
+        return False
+
+# Load model on startup
+load_model()
+
 class ModelRequest(BaseModel):
     prompt: str
-    max_length: Optional[int] = 50
+    max_length: Optional[int] = 50  # Even shorter responses
     temperature: Optional[float] = 0.7
     stream: Optional[bool] = False
 
-# Cache for responses (TTL would be better in production)
-response_cache: Dict[str, Dict] = {}
+# Cache for responses
+response_cache: Dict[str, str] = {}
 
 @lru_cache(maxsize=100)
-def get_cached_response(prompt: str) -> Optional[Dict]:
-    # Only return cache if less than 30 minutes old
-    if prompt in response_cache:
-        timestamp = response_cache[prompt].get("timestamp", 0)
-        if datetime.now().timestamp() - timestamp < 1800:  # 30 minutes
-            return response_cache[prompt]
-    return None
+def get_cached_response(prompt: str) -> Optional[str]:
+    return response_cache.get(prompt)
 
-def cache_response(prompt: str, response: Dict):
-    response["timestamp"] = datetime.now().timestamp()
+def cache_response(prompt: str, response: str):
     response_cache[prompt] = response
     if len(response_cache) > 100:  # Limit cache size
         response_cache.pop(next(iter(response_cache)))
 
 def is_weather_related(text: str) -> bool:
-    """Check if the query is weather-related."""
+    """Check if the response is weather-related."""
     text_lower = text.lower()
     return any(keyword in text_lower for keyword in WEATHER_KEYWORDS)
 
-def get_default_response(prompt: str) -> Dict:
+def get_default_response(prompt: str) -> str:
     """Get a default response for non-weather questions."""
     if "hello" in prompt.lower() or "hi" in prompt.lower():
-        message = "Hello! I'm Terra AI, a weather assistant. How can I help you with weather-related questions today?"
+        return "Hello! I'm Terra AI, a weather assistant. How can I help you with weather-related questions today?"
     elif "how are you" in prompt.lower():
-        message = "I'm here to help you with weather-related questions. What would you like to know about the weather?"
+        return "I'm here to help you with weather-related questions. What would you like to know about the weather?"
     else:
-        message = "I can only assist with weather-related questions. Please ask me about weather conditions, forecasts, or outdoor activity recommendations!"
-    
-    return {
-        "text": message,
-        "domain": "greeting",
-        "data": None
-    }
+        return "I can only assist with weather-related questions. Please ask me about weather conditions, forecasts, or outdoor activity recommendations!"
 
 def extract_location(prompt: str) -> Optional[str]:
     """Extract location from weather-related query."""
@@ -111,157 +116,46 @@ def extract_location(prompt: str) -> Optional[str]:
     
     for marker in location_markers:
         if marker in prompt_lower:
-            parts = prompt_lower.split(marker)
-            if len(parts) > 1:
-                location = parts[-1].strip("?.,! ")
-                return location
-    
-    # Check if location is mentioned without markers
-    words = prompt_lower.split()
-    potential_locations = []
-    for i in range(len(words)):
-        if words[i] not in WEATHER_KEYWORDS and len(words[i]) > 3:
-            potential_locations.append(words[i])
-    
-    return potential_locations[-1] if potential_locations else None
+            location = prompt_lower.split(marker)[-1].strip()
+            return location.strip("?.,! ")
+    return None
 
-def get_weather_data(location: str) -> Optional[Dict]:
-    """Fetch weather data from OpenWeatherMap API."""
-    if not WEATHER_API_KEY:
-        return {
-            "error": "API key not configured",
-            "message": "Please configure the OpenWeatherMap API key. See logs for instructions."
-        }
-
-    try:
-        params = {
-            "q": location,
-            "appid": WEATHER_API_KEY,
-            "units": "metric"  # Use metric units
-        }
+def validate_response(response: str, location: Optional[str]) -> str:
+    """Validate and fix weather response format."""
+    if not response or len(response) < 10:
+        return f"I don't have current weather data for {location if location else 'that location'}."
         
-        response = requests.get(WEATHER_API_URL, params=params)
+    # Force the response into our template
+    lines = response.lower().split('\n')
+    has_conditions = any('current conditions:' in line for line in lines)
+    has_temperature = any('temperature:' in line for line in lines)
+    has_recommendation = any('recommendation:' in line for line in lines)
+    
+    if not (has_conditions and has_temperature and has_recommendation):
+        return f"I don't have current weather data for {location if location else 'that location'}."
         
-        if response.status_code == 200:
-            return response.json()
-        elif response.status_code == 401:
-            logger.error("Invalid API key. Please check your OpenWeatherMap API key.")
-            return {
-                "error": "invalid_key",
-                "message": "Invalid API key. Please check your OpenWeatherMap API key configuration."
-            }
-        elif response.status_code == 404:
-            logger.error(f"Location '{location}' not found")
-            return {
-                "error": "location_not_found",
-                "message": f"Could not find weather data for location: {location}"
-            }
-        else:
-            logger.error(f"Weather API error: {response.status_code} - {response.text}")
-            return {
-                "error": "api_error",
-                "message": f"Error fetching weather data: {response.text}"
-            }
-            
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Error connecting to weather service: {str(e)}")
-        return {
-            "error": "connection_error",
-            "message": "Could not connect to weather service. Please try again later."
-        }
-    except Exception as e:
-        logger.error(f"Unexpected error fetching weather data: {str(e)}")
-        return {
-            "error": "unknown_error",
-            "message": "An unexpected error occurred while fetching weather data."
-        }
+    # Only keep lines matching our template
+    valid_lines = []
+    for line in lines:
+        if any(key in line for key in ['current conditions:', 'temperature:', 'recommendation:']):
+            valid_lines.append(line.capitalize())
+    
+    return '\n'.join(valid_lines) if valid_lines else f"I don't have current weather data for {location if location else 'that location'}."
 
-def get_clothing_recommendation(weather_data: Dict) -> str:
-    """Generate clothing recommendation based on weather conditions."""
-    if not weather_data:
-        return "No specific recommendations available without weather data."
+def generate_response(prompt: str, max_length: int = 50, temperature: float = 0.7):
+    # Extract location first
+    location = extract_location(prompt)
     
-    temp = weather_data.get("main", {}).get("temp", 0)
-    weather_condition = weather_data.get("weather", [{}])[0].get("main", "").lower()
-    wind_speed = weather_data.get("wind", {}).get("speed", 0)
-    
-    recommendations = []
-    
-    # Temperature-based recommendations
-    if temp < 0:
-        recommendations.append("Wear a heavy winter coat, gloves, and a warm hat")
-    elif temp < 10:
-        recommendations.append("Wear a warm jacket and consider layering")
-    elif temp < 20:
-        recommendations.append("A light jacket or sweater should be comfortable")
-    elif temp < 30:
-        recommendations.append("Light clothing and sun protection recommended")
-    else:
-        recommendations.append("Wear lightweight, breathable clothing")
-
-    # Condition-based additions
-    if "rain" in weather_condition or "drizzle" in weather_condition:
-        recommendations.append("bring an umbrella and waterproof jacket")
-    elif "snow" in weather_condition:
-        recommendations.append("wear waterproof boots")
-    elif "thunderstorm" in weather_condition:
-        recommendations.append("stay indoors if possible")
-    
-    # Wind considerations
-    if wind_speed > 10:
-        recommendations.append("bring a windbreaker")
-    
-    return " and ".join(recommendations[:2]) + "."
-
-def format_weather_response(weather_data: Dict, location: str) -> Dict:
-    """Format weather data into a user-friendly response."""
-    if not weather_data:
-        return {
-            "text": f"I don't have current weather data for {location}.",
-            "domain": "weather",
-            "data": None
-        }
-    
-    # Check for error responses
-    if "error" in weather_data:
-        return {
-            "text": weather_data["message"],
-            "domain": "error",
-            "data": weather_data
-        }
-    
-    try:
-        temp = weather_data.get("main", {}).get("temp", 0)
-        temp_f = (temp * 9/5) + 32  # Convert to Fahrenheit
-        
-        condition = weather_data.get("weather", [{}])[0].get("main", "Unknown")
-        description = weather_data.get("weather", [{}])[0].get("description", "Unknown")
-        
-        recommendation = get_clothing_recommendation(weather_data)
-        
-        formatted_response = f"""Current conditions: {description.capitalize()}
-Temperature: {temp:.1f}°C ({temp_f:.1f}°F)
-Recommendation: {recommendation}"""
-
-        return {
-            "text": formatted_response,
-            "domain": "weather",
-            "data": weather_data
-        }
-        
-    except Exception as e:
-        logger.error(f"Error formatting response: {str(e)}")
-        return {
-            "text": f"I have weather data for {location}, but encountered an error formatting it.",
-            "domain": "error",
-            "data": weather_data
-        }
-
-def generate_response(prompt: str, max_length: int = 50, temperature: float = 0.7) -> Dict:
-    """Generate a weather response based on user prompt."""
     # Check if it's a greeting or non-weather question
-    if not is_weather_related(prompt):
+    if not any(keyword in prompt.lower() for keyword in WEATHER_KEYWORDS):
         return get_default_response(prompt)
+
+    # Handle general weather advice questions
+    if "wear" in prompt.lower() or "bring" in prompt.lower() or "pack" in prompt.lower():
+        if not location:
+            return """Current conditions: Variable
+Temperature: 20-30 degrees
+Recommendation: Check local forecast before choosing outfit"""
 
     # Check cache first
     cached_response = get_cached_response(prompt)
@@ -269,41 +163,96 @@ def generate_response(prompt: str, max_length: int = 50, temperature: float = 0.
         logger.info("Using cached response")
         return cached_response
 
-    # Extract location
-    location = extract_location(prompt)
-    if not location:
-        return {
-            "text": "I need a location to provide weather information. Could you specify where you're asking about?",
-            "domain": "weather",
-            "data": None
-        }
+    if model is None or tokenizer is None:
+        if not load_model():
+            raise HTTPException(status_code=503, detail="Model not available")
+    
+    try:
+        # Prepare the prompt with strict weather context and template
+        system_prompt = f"""You are Terra AI, a weather assistant. ONLY respond in this EXACT format:
 
-    # Get weather data
-    weather_data = get_weather_data(location)
-    
-    # Format response
-    response = format_weather_response(weather_data, location)
-    
-    # Cache valid response
-    if response["data"]:
+Current conditions: [1-2 words]
+Temperature: [number] degrees
+Recommendation: [5-10 words]
+
+Here are some EXAMPLE responses:
+
+Question: What's the weather in London?
+Response:
+Current conditions: Rainy
+Temperature: 15 degrees
+Recommendation: Bring umbrella and wear waterproof jacket
+
+Question: How's the beach weather?
+Response:
+Current conditions: Sunny
+Temperature: 28 degrees
+Recommendation: Bring sunscreen and stay hydrated today
+
+Question: Should I go hiking?
+Response:
+Current conditions: Cloudy
+Temperature: 22 degrees
+Recommendation: Good conditions for hiking, bring water
+
+Location: {location if location else 'general area'}
+Rules:
+1. ONLY use the format above
+2. NEVER add extra text
+3. Always give a helpful response
+4. Use common sense temperatures (10-35 degrees)"""
+        
+        full_prompt = f"{system_prompt}\n\nQuestion: {prompt}\nResponse:"
+        
+        # Tokenize input
+        inputs = tokenizer.encode(full_prompt, return_tensors="pt")
+        
+        # Generate with balanced parameters
+        with torch.no_grad():
+            outputs = model.generate(
+                inputs,
+                max_length=max_length,
+                do_sample=True,
+                temperature=0.4,  # Slightly higher for more variety
+                top_p=0.75,
+                top_k=15,  # Allow more options
+                num_return_sequences=1,
+                pad_token_id=tokenizer.eos_token_id,
+                repetition_penalty=1.3,
+                length_penalty=1.3,
+                early_stopping=True,
+                min_length=10,
+                no_repeat_ngram_size=2
+            )
+        
+        # Decode and clean response
+        response = tokenizer.decode(outputs[0], skip_special_tokens=True)
+        response = response.replace(full_prompt, "").strip()
+        
+        # Validate and fix response format
+        response = validate_response(response, location)
+        
+        # Cache valid response
         cache_response(prompt, response)
-    
-    return response
+        
+        return response
+    except Exception as e:
+        logger.error(f"Error generating response: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 async def generate_stream(prompt: str, max_length: int = 50, temperature: float = 0.7):
-    """Stream the response back to the client."""
     try:
         response = generate_response(prompt, max_length, temperature)
-        yield json.dumps(response)
+        yield json.dumps({"text": response, "domain": "weather"})
     except Exception as e:
         yield json.dumps({"error": str(e)})
 
 @app.get("/")
 async def root():
     return {
-        "message": "Welcome to Terra AI Weather API",
+        "message": "Welcome to Terra AI GPT Weather API",
         "status": "running",
-        "version": "2.0.0",
+        "model": "gpt2",
         "endpoints": {
             "/generate": "Generate weather response",
             "/health": "Check server health"
@@ -328,7 +277,7 @@ async def generate(request: ModelRequest):
             request.max_length,
             request.temperature
         )
-        return response
+        return {"text": response, "domain": "weather"}
     
     except Exception as e:
         logger.error(f"Error in generate endpoint: {str(e)}")
@@ -336,22 +285,9 @@ async def generate(request: ModelRequest):
 
 @app.get("/health")
 async def health():
-    # Try to make a test API call to verify weather API is working
-    try:
-        test_response = requests.get(
-            WEATHER_API_URL,
-            params={
-                "q": "London",
-                "appid": WEATHER_API_KEY,
-                "units": "metric"
-            }
-        )
-        api_status = "healthy" if test_response.status_code == 200 else "error"
-    except:
-        api_status = "error"
-        
+    model_status = "healthy" if model is not None and tokenizer is not None else "loading"
     return {
-        "status": "healthy",
-        "weather_api_status": api_status,
+        "status": model_status,
+        "model": "gpt2",
         "cache_size": len(response_cache)
     } 
