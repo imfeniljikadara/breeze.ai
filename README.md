@@ -1,3 +1,12 @@
+---
+title: Terra AI GPT Weather Assistant
+emoji: 🌤️
+colorFrom: blue
+colorTo: green
+sdk: docker
+pinned: false
+---
+
 # Terra AI GPT Weather Assistant
 
 A fast and efficient weather assistant powered by GPT-2 small model.
