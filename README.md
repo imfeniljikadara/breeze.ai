@@ -7,28 +7,70 @@ sdk: docker
 pinned: false
 ---
 
-# Terra AI GPT Weather Assistant
+# Terra AI Weather Assistant
 
-A fast and efficient weather assistant powered by GPT-2 small model.
+A weather assistant that provides real-time weather information and clothing recommendations using the OpenWeatherMap API.
 
 ## Features
 
-- Quick response times using GPT-2 small
-- Weather-specific prompt engineering
-- Streaming support
-- CORS enabled for web integration
-- Health check endpoint
+- Real-time weather data
+- Temperature in both Celsius and Fahrenheit
+- Smart clothing recommendations based on weather conditions
+- Response caching with 30-minute TTL
+- Intelligent location extraction from queries
+- Comprehensive weather condition analysis
 
-## API Endpoints
+## Setup
 
-- `POST /generate`: Generate weather responses
-- `GET /health`: Check server health
-- `GET /`: API information
+1. Get an API key from [OpenWeatherMap](https://openweathermap.org/api)
+2. Create a `.env` file in the project root with:
+   ```
+   WEATHER_API_KEY=your_api_key_here
+   ```
+3. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+4. Run the server:
+   ```bash
+   uvicorn server.main:app --reload
+   ```
 
-## Deployment
+## Usage
 
-This project is designed to be deployed on Hugging Face Spaces.
+Send POST requests to `/generate` with a prompt:
+
+```json
+{
+  "prompt": "What's the weather like in London?"
+}
+```
+
+The response will include:
+- Current conditions
+- Temperature (°C and °F)
+- Clothing/activity recommendations
 
 ## Environment Variables
 
-No environment variables required as we're using the public GPT-2 model. 
+- `WEATHER_API_KEY`: Your OpenWeatherMap API key (required)
+
+## API Endpoints
+
+- `POST /generate`: Get weather information and recommendations
+- `GET /health`: Check API health status
+- `GET /`: API information and documentation
+
+## Response Format
+
+```json
+{
+  "text": "Current conditions: Clear sky\nTemperature: 20.5°C (68.9°F)\nRecommendation: Light clothing and sun protection recommended.",
+  "domain": "weather",
+  "data": { ... }  // Full weather data from OpenWeatherMap
+}
+```
+
+## Deployment
+
+This project is designed to be deployed on Hugging Face Spaces. 
