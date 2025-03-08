@@ -19,7 +19,9 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Weather API configuration
-WEATHER_API_KEY = os.environ.get("WEATHER_API_KEY", "your_api_key_here")
+WEATHER_API_KEY = os.environ.get("WEATHER_API_KEY")
+if not WEATHER_API_KEY:
+    logger.error("No OpenWeatherMap API key found. Please set WEATHER_API_KEY environment variable.")
 WEATHER_API_URL = "https://api.openweathermap.org/data/2.5/weather"
 
 # Weather-related keywords for query validation
@@ -112,6 +114,10 @@ def extract_location(prompt: str) -> Optional[str]:
 
 def get_weather_data(location: str) -> Optional[Dict]:
     """Fetch weather data from OpenWeatherMap API."""
+    if not WEATHER_API_KEY:
+        logger.error("OpenWeatherMap API key not configured")
+        return None
+
     try:
         params = {
             "q": location,
@@ -123,12 +129,21 @@ def get_weather_data(location: str) -> Optional[Dict]:
         
         if response.status_code == 200:
             return response.json()
+        elif response.status_code == 401:
+            logger.error("Invalid API key. Please check your OpenWeatherMap API key.")
+            return None
+        elif response.status_code == 404:
+            logger.error(f"Location '{location}' not found")
+            return None
         else:
             logger.error(f"Weather API error: {response.status_code} - {response.text}")
             return None
             
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Error connecting to weather service: {str(e)}")
+        return None
     except Exception as e:
-        logger.error(f"Error fetching weather data: {str(e)}")
+        logger.error(f"Unexpected error fetching weather data: {str(e)}")
         return None
 
 def get_clothing_recommendation(weather_data: Dict) -> str:
