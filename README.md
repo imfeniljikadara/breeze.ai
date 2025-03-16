@@ -1,5 +1,5 @@
 ---
-title: Terra AI GPT Weather Assistant
+title: Terra AI Weather Assistant
 emoji: 🌤️
 colorFrom: blue
 colorTo: green
@@ -7,28 +7,81 @@ sdk: docker
 pinned: false
 ---
 
-# Terra AI GPT Weather Assistant
+# Terra AI Weather Assistant 🌤️
 
-A fast and efficient weather assistant powered by GPT-2 small model.
+A specialized weather assistant powered by GPT-2, fine-tuned on weather-related conversations.
 
 ## Features
 
-- Quick response times using GPT-2 small
-- Weather-specific prompt engineering
-- Streaming support
-- CORS enabled for web integration
-- Health check endpoint
+- 🌡️ Location-based weather information
+- 🏃‍♂️ Activity-specific weather advisories
+- 🎯 Focused, template-based responses
+- ⚡ Fast response times with caching
+- 🔄 Real-time weather recommendations
 
 ## API Endpoints
 
-- `POST /generate`: Generate weather responses
-- `GET /health`: Check server health
-- `GET /`: API information
+### `/generate`
 
-## Deployment
+Generate weather-related responses:
 
-This project is designed to be deployed on Hugging Face Spaces.
+```bash
+curl -X POST "https://imfeniljikadara-terra-ai-gpt.hf.space/generate" \
+     -H "Content-Type: application/json" \
+     -d '{"prompt": "What is the weather like in New York?"}'
+```
 
-## Environment Variables
+### Response Format
 
-No environment variables required as we're using the public GPT-2 model. 
+For locations:
+```
+Current conditions in [location]:
+Temperature: [number range in celsius]
+Conditions: [1-2 word description]
+Recommendation: [1 specific action]
+```
+
+For activities:
+```
+Weather advisory for [activity]:
+Current conditions: [brief description]
+Safety level: [Good/Moderate/Poor]
+Recommendation: [1 specific action]
+```
+
+## Model Details
+
+- Base model: GPT-2
+- Fine-tuned on: Weather conversations
+- Response format: Structured templates
+- Temperature: 0.4 (focused responses)
+- Max length: 50 tokens
+
+## Usage
+
+1. Ask about weather in a location:
+   ```
+   What's the weather like in Tokyo?
+   ```
+
+2. Get activity recommendations:
+   ```
+   Should I go hiking today?
+   ```
+
+3. Check conditions for outdoor activities:
+   ```
+   Is it safe for outdoor photography?
+   ```
+
+## Development
+
+Built with:
+- FastAPI
+- Hugging Face Transformers
+- PyTorch
+- Docker
+
+## License
+
+MIT License 

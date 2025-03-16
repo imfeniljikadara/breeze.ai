@@ -61,7 +61,7 @@ def load_model():
     global model, tokenizer
     try:
         # Load model - using GPT-2 small for faster responses
-        MODEL_PATH = "gpt2"
+        MODEL_PATH = "imfeniljikadara/terra-ai-weather-gpt2"
         logger.info(f"Loading model {MODEL_PATH}...")
         
         # Load tokenizer first
