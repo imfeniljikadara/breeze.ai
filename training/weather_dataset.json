@@ -1,0 +1,65 @@
+{
+    "version": "1.0",
+    "data": [
+        {
+            "question": "What's the weather like in New York?",
+            "response": "Current conditions in New York:\nTemperature: 18-22°C\nConditions: Partly cloudy\nRecommendation: Bring a light jacket"
+        },
+        {
+            "question": "Should I go hiking today?",
+            "response": "Weather advisory for hiking:\nCurrent conditions: Clear skies, mild temperature\nSafety level: Good\nRecommendation: Wear sunscreen and bring water"
+        },
+        {
+            "question": "Is it good weather for the beach?",
+            "response": "Weather advisory for beach activities:\nCurrent conditions: Sunny, light breeze\nSafety level: Good\nRecommendation: Apply SPF 30+ sunscreen"
+        },
+        {
+            "question": "What's the temperature in London?",
+            "response": "Current conditions in London:\nTemperature: 15-17°C\nConditions: Light rain\nRecommendation: Carry an umbrella"
+        },
+        {
+            "question": "Should I plan outdoor sports today?",
+            "response": "Weather advisory for outdoor sports:\nCurrent conditions: Moderate humidity, clear\nSafety level: Good\nRecommendation: Stay hydrated frequently"
+        },
+        {
+            "question": "How's the weather in Tokyo?",
+            "response": "Current conditions in Tokyo:\nTemperature: 25-28°C\nConditions: Humid\nRecommendation: Use cooling wear"
+        },
+        {
+            "question": "Is it safe to go cycling now?",
+            "response": "Weather advisory for cycling:\nCurrent conditions: Light wind, clear visibility\nSafety level: Good\nRecommendation: Wear reflective gear"
+        },
+        {
+            "question": "What's the weather in Dubai?",
+            "response": "Current conditions in Dubai:\nTemperature: 35-38°C\nConditions: Sunny\nRecommendation: Avoid midday activities"
+        },
+        {
+            "question": "Should I take an umbrella to work?",
+            "response": "Weather advisory for commuting:\nCurrent conditions: Scattered showers\nSafety level: Moderate\nRecommendation: Take a foldable umbrella"
+        },
+        {
+            "question": "What's the temperature in Sydney?",
+            "response": "Current conditions in Sydney:\nTemperature: 22-25°C\nConditions: Sunny\nRecommendation: Use UV protection"
+        },
+        {
+            "question": "Is it good weather for running?",
+            "response": "Weather advisory for running:\nCurrent conditions: Cool morning air\nSafety level: Good\nRecommendation: Wear breathable layers"
+        },
+        {
+            "question": "How's the weather in Mumbai?",
+            "response": "Current conditions in Mumbai:\nTemperature: 30-32°C\nConditions: Humid\nRecommendation: Stay hydrated"
+        },
+        {
+            "question": "Should I plan a picnic today?",
+            "response": "Weather advisory for picnic:\nCurrent conditions: Mild, partly cloudy\nSafety level: Good\nRecommendation: Bring sun protection"
+        },
+        {
+            "question": "What's the weather in Moscow?",
+            "response": "Current conditions in Moscow:\nTemperature: -5-(-2)°C\nConditions: Snowy\nRecommendation: Wear thermal layers"
+        },
+        {
+            "question": "Is it safe for outdoor photography?",
+            "response": "Weather advisory for photography:\nCurrent conditions: Overcast, stable\nSafety level: Good\nRecommendation: Bring lens protection"
+        }
+    ]
+} 
