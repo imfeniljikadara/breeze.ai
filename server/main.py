@@ -26,6 +26,18 @@ WEATHER_KEYWORDS = {
     'jacket', 'coat', 'conditions'
 }
 
+# Weather response templates
+WEATHER_TEMPLATES = {
+    'location': """Current conditions in {location}:
+Temperature: {temp_range}
+Conditions: {conditions}
+Recommendation: {recommendation}""",
+    'activity': """Weather advisory for {activity}:
+Current conditions: {conditions}
+Safety level: {safety}
+Recommendation: {recommendation}""",
+}
+
 app = FastAPI(
     title="Terra AI GPT Weather API",
     description="GPT-2 powered weather analysis API",
@@ -96,9 +108,19 @@ def cache_response(prompt: str, response: str):
         response_cache.pop(next(iter(response_cache)))
 
 def is_weather_related(text: str) -> bool:
-    """Check if the response is weather-related."""
+    """Check if the response is weather-related and properly formatted."""
     text_lower = text.lower()
-    return any(keyword in text_lower for keyword in WEATHER_KEYWORDS)
+    
+    # Check for weather keywords
+    has_weather_terms = any(keyword in text_lower for keyword in WEATHER_KEYWORDS)
+    
+    # Check for proper formatting
+    has_template_structure = (
+        ('current conditions:' in text_lower or 'temperature:' in text_lower) and
+        'recommendation:' in text_lower
+    )
+    
+    return has_weather_terms and has_template_structure
 
 def get_default_response(prompt: str) -> str:
     """Get a default response for non-weather questions."""
@@ -109,53 +131,10 @@ def get_default_response(prompt: str) -> str:
     else:
         return "I can only assist with weather-related questions. Please ask me about weather conditions, forecasts, or outdoor activity recommendations!"
 
-def extract_location(prompt: str) -> Optional[str]:
-    """Extract location from weather-related query."""
-    location_markers = ["in ", "at ", "for ", "about "]
-    prompt_lower = prompt.lower()
-    
-    for marker in location_markers:
-        if marker in prompt_lower:
-            location = prompt_lower.split(marker)[-1].strip()
-            return location.strip("?.,! ")
-    return None
-
-def validate_response(response: str, location: Optional[str]) -> str:
-    """Validate and fix weather response format."""
-    if not response or len(response) < 10:
-        return f"I don't have current weather data for {location if location else 'that location'}."
-        
-    # Force the response into our template
-    lines = response.lower().split('\n')
-    has_conditions = any('current conditions:' in line for line in lines)
-    has_temperature = any('temperature:' in line for line in lines)
-    has_recommendation = any('recommendation:' in line for line in lines)
-    
-    if not (has_conditions and has_temperature and has_recommendation):
-        return f"I don't have current weather data for {location if location else 'that location'}."
-        
-    # Only keep lines matching our template
-    valid_lines = []
-    for line in lines:
-        if any(key in line for key in ['current conditions:', 'temperature:', 'recommendation:']):
-            valid_lines.append(line.capitalize())
-    
-    return '\n'.join(valid_lines) if valid_lines else f"I don't have current weather data for {location if location else 'that location'}."
-
 def generate_response(prompt: str, max_length: int = 50, temperature: float = 0.7):
-    # Extract location first
-    location = extract_location(prompt)
-    
     # Check if it's a greeting or non-weather question
     if not any(keyword in prompt.lower() for keyword in WEATHER_KEYWORDS):
         return get_default_response(prompt)
-
-    # Handle general weather advice questions
-    if "wear" in prompt.lower() or "bring" in prompt.lower() or "pack" in prompt.lower():
-        if not location:
-            return """Current conditions: Variable
-Temperature: 20-30 degrees
-Recommendation: Check local forecast before choosing outfit"""
 
     # Check cache first
     cached_response = get_cached_response(prompt)
@@ -169,68 +148,62 @@ Recommendation: Check local forecast before choosing outfit"""
     
     try:
         # Prepare the prompt with strict weather context and template
-        system_prompt = f"""You are Terra AI, a weather assistant. ONLY respond in this EXACT format:
+        system_prompt = """You are Terra AI, a focused weather assistant. Follow these rules EXACTLY:
 
-Current conditions: [1-2 words]
-Temperature: [number] degrees
-Recommendation: [5-10 words]
+1. ONLY provide current weather information
+2. Use EXACTLY this format for all responses:
 
-Here are some EXAMPLE responses:
+For locations:
+Current conditions in [location]:
+Temperature: [number range in celsius]
+Conditions: [1-2 word description]
+Recommendation: [1 specific action]
 
-Question: What's the weather in London?
-Response:
-Current conditions: Rainy
-Temperature: 15 degrees
-Recommendation: Bring umbrella and wear waterproof jacket
+For activities:
+Weather advisory for [activity]:
+Current conditions: [brief description]
+Safety level: [Good/Moderate/Poor]
+Recommendation: [1 specific action]
 
-Question: How's the beach weather?
-Response:
-Current conditions: Sunny
-Temperature: 28 degrees
-Recommendation: Bring sunscreen and stay hydrated today
-
-Question: Should I go hiking?
-Response:
-Current conditions: Cloudy
-Temperature: 22 degrees
-Recommendation: Good conditions for hiking, bring water
-
-Location: {location if location else 'general area'}
-Rules:
-1. ONLY use the format above
-2. NEVER add extra text
-3. Always give a helpful response
-4. Use common sense temperatures (10-35 degrees)"""
+3. Keep responses under 4 lines
+4. If unsure about current conditions, say EXACTLY: "I don't have current weather data for [location/activity]"
+5. NEVER mention historical data or trends
+6. NEVER discuss non-weather topics"""
         
-        full_prompt = f"{system_prompt}\n\nQuestion: {prompt}\nResponse:"
+        full_prompt = f"{system_prompt}\n\nUser question: {prompt}\nWeather response:"
         
         # Tokenize input
         inputs = tokenizer.encode(full_prompt, return_tensors="pt")
         
-        # Generate with balanced parameters
+        # Generate with very strict parameters
         with torch.no_grad():
             outputs = model.generate(
                 inputs,
                 max_length=max_length,
                 do_sample=True,
-                temperature=0.4,  # Slightly higher for more variety
-                top_p=0.75,
-                top_k=15,  # Allow more options
+                temperature=0.4,  # Even lower temperature for more focused responses
+                top_p=0.7,
+                top_k=10,  # More restricted sampling
                 num_return_sequences=1,
                 pad_token_id=tokenizer.eos_token_id,
-                repetition_penalty=1.3,
-                length_penalty=1.3,
+                repetition_penalty=1.4,  # Increased repetition penalty
+                length_penalty=1.3,  # Encourage even more concise responses
                 early_stopping=True,
-                min_length=10,
-                no_repeat_ngram_size=2
+                min_length=20,  # Ensure complete responses
+                no_repeat_ngram_size=3  # Stricter repetition prevention
             )
         
         # Decode and clean response
         response = tokenizer.decode(outputs[0], skip_special_tokens=True)
         response = response.replace(full_prompt, "").strip()
         
-        # Validate and fix response format
-        response = validate_response(response, location)
+        # Validate response is weather-related and properly formatted
+        if not is_weather_related(response):
+            return "I don't have current weather data for that location. Please ask about specific weather conditions or forecasts."
+        
+        # Clean up common model artifacts
+        response = response.replace("AI:", "").replace("Assistant:", "").strip()
+        response = response.split("\n\n")[0]  # Take only the first paragraph
         
         # Cache valid response
         cache_response(prompt, response)
